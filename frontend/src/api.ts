@@ -7,7 +7,8 @@ import type {
   PipelineSchema,
 } from "./types";
 
-const BASE = "/api";
+const API_HOST = import.meta.env.VITE_API_URL || "";
+const BASE = `${API_HOST}/api`;
 
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
