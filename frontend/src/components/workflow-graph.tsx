@@ -1,10 +1,12 @@
 import { useMemo } from "react";
-import type { NodeName, PipelineEdge } from "@/types";
+import type { NodeExecutionState, NodeName, PipelineEdge } from "@/types";
 
 interface WorkflowGraphProps {
   traversedNodes?: string[];
   traversedEdges?: PipelineEdge[];
   terminalVerdict?: "apply" | "review" | "stop";
+  nodeStates?: Partial<Record<NodeName, NodeExecutionState>>;
+  activeNode?: NodeName | null;
 }
 
 interface NodeLayout {
@@ -110,6 +112,8 @@ export function WorkflowGraph({
   traversedNodes = [],
   traversedEdges = [],
   terminalVerdict,
+  nodeStates = {},
+  activeNode = null,
 }: WorkflowGraphProps) {
   const visitedSet = useMemo(() => new Set(traversedNodes), [traversedNodes]);
 
@@ -134,11 +138,20 @@ export function WorkflowGraph({
           <span className="font-mono text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             Workflow Graph
           </span>
-          <span className="text-[11px] text-muted-foreground">• Deterministic Pipeline DAG</span>
+          <span className="text-[11px] text-muted-foreground">• Live Traversal</span>
         </div>
-        <span className="font-mono text-[11px] text-muted-foreground">
-          {visitedSet.size > 0 ? `${visitedSet.size} of 6 nodes active` : "Schema idle"}
-        </span>
+        <div className="flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
+          {activeNode ? (
+            <span className="inline-flex items-center gap-1.5 text-blue-600 dark:text-blue-400 font-medium">
+              <span className="size-1.5 rounded-full bg-blue-500 animate-pulse" />
+              active: {activeNode}
+            </span>
+          ) : visitedSet.size > 0 ? (
+            <span>{visitedSet.size} of 6 nodes active</span>
+          ) : (
+            <span>idle</span>
+          )}
+        </div>
       </div>
 
       <div className="w-full flex items-center justify-center py-2">
@@ -146,7 +159,7 @@ export function WorkflowGraph({
           viewBox="0 0 540 380"
           className="w-full max-w-[540px] h-[360px] sm:h-[400px] select-none"
           role="img"
-          aria-label="ChangeGate workflow traversal diagram"
+          aria-label="ChangeGate live workflow traversal diagram"
         >
           <defs>
             <marker
@@ -196,23 +209,39 @@ export function WorkflowGraph({
 
           {/* Nodes */}
           {NODES.map((node) => {
+            const explicitState = nodeStates[node.id];
             const isVisited = visitedSet.has(node.id);
-            const isTerminal =
-              node.id === "apply" || node.id === "review" || node.id === "stop";
+            const isRunning = explicitState === "running" || activeNode === node.id;
+            const isCompleted = explicitState === "completed" || (!explicitState && isVisited);
+            const isTerminal = node.id === "apply" || node.id === "review" || node.id === "stop";
 
             let strokeColor = "currentColor";
             let strokeOpacity = 0.25;
+            let strokeWidth = 1;
             let fillColor = "transparent";
             let titleColor = "currentColor";
             let titleOpacity = 0.45;
             let sublabelColor = "currentColor";
             let sublabelOpacity = 0.3;
-            let strokeWidth = 1;
+            let statusSymbol = "○";
+            let statusSymbolColor = "currentColor";
 
-            if (isVisited) {
+            if (isRunning) {
+              strokeColor = "#3b82f6";
+              strokeOpacity = 1;
+              strokeWidth = 2;
+              fillColor = "rgba(59, 130, 246, 0.15)";
+              titleColor = "#3b82f6";
+              titleOpacity = 1;
+              sublabelColor = "#3b82f6";
+              sublabelOpacity = 0.85;
+              statusSymbol = "●";
+              statusSymbolColor = "#3b82f6";
+            } else if (isCompleted) {
               strokeWidth = 2;
               titleOpacity = 1;
               sublabelOpacity = 0.75;
+              statusSymbol = "✓";
 
               if (node.id === "apply") {
                 strokeColor = "#10b981";
@@ -220,35 +249,41 @@ export function WorkflowGraph({
                 fillColor = "rgba(16, 185, 129, 0.12)";
                 titleColor = "#10b981";
                 sublabelColor = "#10b981";
+                statusSymbolColor = "#10b981";
               } else if (node.id === "review") {
                 strokeColor = "#f59e0b";
                 strokeOpacity = 1;
                 fillColor = "rgba(245, 158, 11, 0.12)";
                 titleColor = "#f59e0b";
                 sublabelColor = "#f59e0b";
+                statusSymbolColor = "#f59e0b";
               } else if (node.id === "stop") {
                 strokeColor = "#ef4444";
                 strokeOpacity = 1;
                 fillColor = "rgba(239, 68, 68, 0.12)";
                 titleColor = "#ef4444";
                 sublabelColor = "#ef4444";
+                statusSymbolColor = "#ef4444";
               } else if (node.id === "evaluate") {
                 strokeColor = "#3b82f6";
                 strokeOpacity = 1;
                 fillColor = "rgba(59, 130, 246, 0.12)";
                 titleColor = "#3b82f6";
                 sublabelColor = "#3b82f6";
+                statusSymbolColor = "#3b82f6";
               } else {
                 strokeColor = "currentColor";
                 strokeOpacity = 0.85;
                 fillColor = "rgba(120, 120, 120, 0.08)";
                 titleColor = "currentColor";
                 sublabelColor = "currentColor";
+                statusSymbolColor = "currentColor";
               }
             } else if (isTerminal) {
               strokeOpacity = 0.16;
               titleOpacity = 0.28;
               sublabelOpacity = 0.2;
+              statusSymbol = "○";
             }
 
             return (
@@ -266,23 +301,38 @@ export function WorkflowGraph({
                 />
                 {/* Node Title */}
                 <text
-                  x={node.x + node.w / 2}
+                  x={node.x + 14}
                   y={node.y + 22}
-                  textAnchor="middle"
+                  textAnchor="start"
                   fontFamily="ui-monospace, monospace"
                   fontSize={13}
-                  fontWeight={isVisited ? 700 : 500}
+                  fontWeight={isRunning || isCompleted ? 700 : 500}
                   fill={titleColor}
                   fillOpacity={titleOpacity}
                   letterSpacing="0.05em"
                 >
                   {node.label.toUpperCase()}
                 </text>
+
+                {/* State Symbol: ○ waiting, ● running, ✓ completed */}
+                <text
+                  x={node.x + node.w - 14}
+                  y={node.y + 22}
+                  textAnchor="end"
+                  fontFamily="ui-monospace, monospace"
+                  fontSize={12}
+                  fontWeight={700}
+                  fill={statusSymbolColor}
+                  fillOpacity={isRunning || isCompleted ? 1 : 0.4}
+                >
+                  {statusSymbol}
+                </text>
+
                 {/* Node Sublabel */}
                 <text
-                  x={node.x + node.w / 2}
+                  x={node.x + 14}
                   y={node.y + 38}
-                  textAnchor="middle"
+                  textAnchor="start"
                   fontFamily="ui-sans-serif, system-ui, sans-serif"
                   fontSize={10}
                   fontWeight={400}

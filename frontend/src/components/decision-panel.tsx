@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, RefreshCw, ShieldAlert, Users, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, ShieldAlert, Users, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Decision } from "@/types";
 
@@ -16,7 +16,10 @@ function formatEngineeringReason(reason: string): string {
     return "Database schema modification detected. Human approval is required before applying this change.";
   }
   if (reason.includes("unauthorized bypass or permissive wildcard")) {
-    return "An authentication/CORS security violation was detected. Automated execution was stopped.";
+    return "Automated execution was halted because a security policy violation was detected.";
+  }
+  if (reason.includes("Automated test regression")) {
+    return "Automated execution was halted due to regression test failures.";
   }
   return reason;
 }
@@ -24,7 +27,7 @@ function formatEngineeringReason(reason: string): string {
 export function DecisionPanel({ decision, loading, onReevaluate }: DecisionPanelProps) {
   if (loading) {
     return (
-      <div className="rounded border border-border bg-card/40 p-3.5 space-y-2">
+      <div className="rounded border border-border/80 bg-card/40 p-3.5 space-y-2">
         <div className="flex items-center justify-between">
           <span className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             Decision
@@ -32,8 +35,8 @@ export function DecisionPanel({ decision, loading, onReevaluate }: DecisionPanel
           <span className="font-mono text-[11px] text-muted-foreground">Evaluating...</span>
         </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <div className="size-2 rounded-full bg-blue-500 animate-pulse" />
-          <span>Executing gate pipeline...</span>
+          <Loader2 className="size-3.5 animate-spin text-blue-500 shrink-0" />
+          <span>Evaluating change...</span>
         </div>
       </div>
     );

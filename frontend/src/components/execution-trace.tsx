@@ -1,22 +1,31 @@
 import { TraceStepRow } from "./trace-step-row";
-import type { TraceStep } from "@/types";
+import type { LiveTraceItem, TraceStep } from "@/types";
 
 interface ExecutionTraceProps {
-  steps: TraceStep[];
+  items?: (LiveTraceItem | TraceStep)[];
+  steps?: TraceStep[];
+  isRunning?: boolean;
 }
 
-export function ExecutionTrace({ steps }: ExecutionTraceProps) {
-  if (!steps || steps.length === 0) {
+export function ExecutionTrace({ items, steps, isRunning }: ExecutionTraceProps) {
+  const displayItems = items && items.length > 0 ? items : steps ?? [];
+
+  if (displayItems.length === 0) {
     return (
       <div className="rounded border border-dashed border-border/80 bg-card/20 p-6 text-center">
         <span className="font-mono text-xs text-muted-foreground">
-          No execution trace recorded. Select a change proposal to evaluate.
+          {isRunning
+            ? "Initializing pipeline execution..."
+            : "No execution trace recorded. Select a change proposal to evaluate."}
         </span>
       </div>
     );
   }
 
-  const totalTime = steps.reduce((acc, s) => acc + s.duration_ms, 0);
+  const completedItems = displayItems.filter(
+    (item) => !("state" in item) || item.state === "completed"
+  );
+  const totalTime = completedItems.reduce((acc, s) => acc + (s.duration_ms ?? 0), 0);
 
   return (
     <div className="rounded border border-border/80 bg-card/40 p-4 space-y-3">
@@ -25,23 +34,32 @@ export function ExecutionTrace({ steps }: ExecutionTraceProps) {
           <span className="font-mono text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             Execution Trace
           </span>
-          <span className="text-[11px] text-muted-foreground">• Chronological Run Audit</span>
+          <span className="text-[11px] text-muted-foreground">
+            {isRunning ? "• Streaming live events" : "• Chronological Run Audit"}
+          </span>
         </div>
-        <span className="font-mono text-[11px] text-muted-foreground">
-          {steps.length} steps • {totalTime.toFixed(1)} ms total
-        </span>
+        <div className="flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
+          {isRunning && (
+            <span className="inline-flex items-center gap-1.5 text-blue-600 dark:text-blue-400 font-medium">
+              <span className="size-1.5 rounded-full bg-blue-500 animate-pulse" />
+              live
+            </span>
+          )}
+          <span>
+            {completedItems.length} of {displayItems.length} steps • {totalTime.toFixed(1)} ms
+          </span>
+        </div>
       </div>
 
       <div className="space-y-2.5 pt-1">
-        {steps.map((step) => (
+        {displayItems.map((item) => (
           <TraceStepRow
-            key={step.step_number}
-            step={step}
-            // default expand evaluate or warning/failed steps for instant engineering visibility
+            key={item.step_number}
+            item={item}
             defaultExpanded={
-              step.node === "evaluate" ||
-              step.status === "warning" ||
-              step.status === "failed"
+              item.node === "evaluate" ||
+              item.status === "warning" ||
+              item.status === "failed"
             }
           />
         ))}
