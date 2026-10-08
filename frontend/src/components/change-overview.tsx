@@ -2,6 +2,7 @@ import { Bot, GitBranch, Plus, Minus, UserCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { DiffViewer } from "./diff-viewer";
 import { ChangedFileList } from "./changed-file-list";
+import { PROPOSAL_LABELS } from "./proposal-selector";
 import type { ChangeProposal } from "@/types";
 
 interface ChangeOverviewProps {
@@ -16,14 +17,20 @@ export function ChangeOverview({
   onSelectFile,
 }: ChangeOverviewProps) {
   const isAgent = proposal.author_type === "autonomous_agent";
+  const changeMeta = PROPOSAL_LABELS[proposal.id];
+
+  // Remove any "risk" tags from visible UI per product rules
+  const visibleTags = proposal.tags.filter(
+    (tag) => !tag.toLowerCase().includes("risk")
+  );
 
   return (
     <div className="space-y-4">
-      {/* Header Info */}
-      <div className="space-y-2 rounded border bg-card/40 p-4">
+      {/* Proposal Metadata Card */}
+      <div className="space-y-2.5 rounded border border-border/80 bg-card/40 p-4">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="font-mono text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            {proposal.id}
+          <span className="font-mono text-xs font-bold text-foreground">
+            {changeMeta?.code ?? proposal.id.toUpperCase()}
           </span>
           <span className="text-muted-foreground/40">•</span>
           <span className="inline-flex items-center gap-1 rounded border border-border/80 bg-background/60 px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
@@ -40,22 +47,23 @@ export function ChangeOverview({
           </span>
         </div>
 
-        <h2 className="text-base font-semibold leading-snug tracking-tight text-foreground">
-          {proposal.title}
-        </h2>
-
-        <p className="text-xs text-muted-foreground leading-relaxed">
-          {proposal.summary}
-        </p>
+        <div>
+          <h2 className="text-sm font-semibold leading-snug tracking-tight text-foreground">
+            {proposal.title}
+          </h2>
+          <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+            {proposal.summary}
+          </p>
+        </div>
 
         {/* Tags and Diff Stats */}
-        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-border/40">
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2.5 border-t border-border/40">
           <div className="flex flex-wrap items-center gap-1.5">
-            {proposal.tags.map((tag) => (
+            {visibleTags.map((tag) => (
               <Badge
                 key={tag}
                 variant="secondary"
-                className="rounded px-1.5 py-0 text-[10px] font-mono font-normal text-muted-foreground"
+                className="rounded px-2 py-0 text-[10px] font-mono font-normal text-muted-foreground"
               >
                 {tag}
               </Badge>
@@ -72,7 +80,7 @@ export function ChangeOverview({
               {proposal.diff_stat.deletions}
             </span>
             <span className="text-muted-foreground text-[11px]">
-              ({proposal.diff_stat.files_changed} files)
+              ({proposal.diff_stat.files_changed} {proposal.diff_stat.files_changed === 1 ? "file" : "files"})
             </span>
           </div>
         </div>
