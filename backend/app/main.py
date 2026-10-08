@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import time
 import uuid
 from fastapi import APIRouter, FastAPI, HTTPException
@@ -22,9 +23,12 @@ app = FastAPI(
     description="Developer-infrastructure tool evaluating autonomous software change proposals via LangGraph & Jev.",
 )
 
+raw_origins = os.environ.get("ALLOWED_ORIGINS", "http://localhost:5176,http://localhost:5173")
+allowed_origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
