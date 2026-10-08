@@ -74,3 +74,18 @@ def test_health_endpoint(client):
     data = res.json()
     assert data["status"] == "ok"
     assert data["service"] == "ChangeGate"
+
+
+def test_evaluate_stream_endpoint(client):
+    """GET /api/evaluate/stream yields SSE execution events."""
+    with client.stream("GET", "/api/evaluate/stream?proposal_id=prop-001") as res:
+        assert res.status_code == 200
+        assert "text/event-stream" in res.headers["content-type"]
+        events = []
+        for line in res.iter_lines():
+            if line.startswith("event:"):
+                events.append(line.split(":", 1)[1].strip())
+        assert "run_started" in events
+        assert "node_started" in events
+        assert "node_completed" in events
+        assert "run_completed" in events
