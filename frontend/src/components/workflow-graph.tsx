@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import type { NodeExecutionState, NodeName, PipelineEdge } from "@/types";
 
 interface WorkflowGraphProps {
+  hasSelection?: boolean;
   traversedNodes?: string[];
   traversedEdges?: PipelineEdge[];
   terminalVerdict?: "apply" | "review" | "stop";
@@ -109,12 +110,23 @@ const EDGES: {
 ];
 
 export function WorkflowGraph({
+  hasSelection = true,
   traversedNodes = [],
   traversedEdges = [],
   terminalVerdict,
   nodeStates = {},
   activeNode = null,
 }: WorkflowGraphProps) {
+  if (!hasSelection) {
+    return (
+      <div className="rounded border border-dashed border-border/80 bg-card/20 p-8 text-center">
+        <span className="font-mono text-xs text-muted-foreground">
+          Select a change to begin
+        </span>
+      </div>
+    );
+  }
+
   const visitedSet = useMemo(() => new Set(traversedNodes), [traversedNodes]);
 
   const visitedEdgeSet = useMemo(() => {

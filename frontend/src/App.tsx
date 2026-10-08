@@ -68,7 +68,7 @@ function createInitialLiveTrace(): LiveTraceItem[] {
 
 export default function App() {
   const [proposals, setProposals] = useState<ChangeProposal[]>([]);
-  const [selectedProposalId, setSelectedProposalId] = useState<string>("prop-001");
+  const [selectedProposalId, setSelectedProposalId] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<string | undefined>(undefined);
   const [result, setResult] = useState<GateEvaluationResult | null>(null);
   const [runs, setRuns] = useState<GateEvaluationResult[]>([]);
@@ -81,7 +81,7 @@ export default function App() {
   const [activeNode, setActiveNode] = useState<NodeName | null>(null);
   const [traversedNodes, setTraversedNodes] = useState<string[]>([]);
   const [traversedEdges, setTraversedEdges] = useState<PipelineEdge[]>([]);
-  const [liveTraceItems, setLiveTraceItems] = useState<LiveTraceItem[]>(createInitialLiveTrace());
+  const [liveTraceItems, setLiveTraceItems] = useState<LiveTraceItem[]>([]);
   const [terminalVerdict, setTerminalVerdict] = useState<"apply" | "review" | "stop" | undefined>(undefined);
 
   const activeStreamCleanupRef = useRef<(() => void) | null>(null);
@@ -262,11 +262,6 @@ export default function App() {
       if (!mounted) return;
       if (fetchedProposals.length > 0) {
         setProposals(fetchedProposals);
-        const firstId = fetchedProposals[0].id;
-        setSelectedProposalId(firstId);
-        setSelectedFile(fetchedProposals[0].changed_files[0]);
-        // Immediately start live execution for initial proposal
-        startLiveEvaluation(firstId);
       }
       if (fetchedRuns.length > 0) {
         setRuns(fetchedRuns);
@@ -286,7 +281,8 @@ export default function App() {
 
   // Current active proposal
   const currentProposal = useMemo(() => {
-    return proposals.find((p) => p.id === selectedProposalId) ?? proposals[0] ?? null;
+    if (!selectedProposalId) return null;
+    return proposals.find((p) => p.id === selectedProposalId) ?? null;
   }, [proposals, selectedProposalId]);
 
   // Handle switching proposals: resets immediately and triggers live evaluation
@@ -392,12 +388,18 @@ export default function App() {
               />
             )}
 
-            {currentProposal && (
+            {currentProposal ? (
               <ChangeOverview
                 proposal={currentProposal}
                 selectedFile={selectedFile}
                 onSelectFile={setSelectedFile}
               />
+            ) : (
+              <div className="rounded border border-dashed border-border/80 bg-card/20 p-6 text-center">
+                <span className="font-mono text-xs text-muted-foreground">
+                  Select a change to begin
+                </span>
+              </div>
             )}
           </section>
 
@@ -407,11 +409,16 @@ export default function App() {
             <DecisionPanel
               decision={result ? result.decision : null}
               loading={loading}
-              onReevaluate={() => startLiveEvaluation(selectedProposalId)}
+              onReevaluate={
+                selectedProposalId
+                  ? () => startLiveEvaluation(selectedProposalId)
+                  : undefined
+              }
             />
 
             {/* Live Workflow Graph with nodeStates (waiting, running, completed) */}
             <WorkflowGraph
+              hasSelection={Boolean(selectedProposalId)}
               traversedNodes={traversedNodes}
               traversedEdges={traversedEdges}
               terminalVerdict={terminalVerdict}

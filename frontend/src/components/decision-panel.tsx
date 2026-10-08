@@ -46,7 +46,7 @@ export function DecisionPanel({ decision, loading, onReevaluate }: DecisionPanel
     return (
       <div className="rounded border border-dashed border-border/80 bg-card/20 p-3.5 text-center">
         <span className="font-mono text-xs text-muted-foreground">
-          No evaluation active. Select a change to evaluate.
+          Select a change to begin
         </span>
       </div>
     );

@@ -3,7 +3,7 @@ import type { ChangeProposal } from "@/types";
 
 interface ProposalSelectorProps {
   proposals: ChangeProposal[];
-  selectedId: string;
+  selectedId: string | null;
   onSelect: (proposalId: string) => void;
   disabled?: boolean;
 }
@@ -22,11 +22,6 @@ export function ProposalSelector({
   onSelect,
   disabled = false,
 }: ProposalSelectorProps) {
-  const current = PROPOSAL_LABELS[selectedId] ?? {
-    code: selectedId.toUpperCase(),
-    title: proposals.find((p) => p.id === selectedId)?.title ?? "Select change",
-  };
-
   return (
     <div className="space-y-1.5">
       <label
@@ -39,11 +34,18 @@ export function ProposalSelector({
         <GitPullRequest className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
         <select
           id="change-select"
-          value={selectedId}
-          onChange={(e) => onSelect(e.target.value)}
+          value={selectedId ?? ""}
+          onChange={(e) => {
+            if (e.target.value) {
+              onSelect(e.target.value);
+            }
+          }}
           disabled={disabled}
           className="w-full appearance-none rounded border border-border bg-card/60 py-2.5 pr-10 pl-9 font-mono text-xs text-foreground transition-colors hover:border-border/80 focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 cursor-pointer"
         >
+          <option value="" disabled className="bg-popover text-muted-foreground py-1">
+            Select a change to begin
+          </option>
           {proposals.map((prop) => {
             const meta = PROPOSAL_LABELS[prop.id] ?? {
               code: prop.id.toUpperCase(),

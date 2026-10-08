@@ -16,7 +16,7 @@ export function ExecutionTrace({ items, steps, isRunning }: ExecutionTraceProps)
         <span className="font-mono text-xs text-muted-foreground">
           {isRunning
             ? "Initializing pipeline execution..."
-            : "No execution trace recorded. Select a change proposal to evaluate."}
+            : "No execution yet"}
         </span>
       </div>
     );
