@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Shield, Sun, Moon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/lib/use-theme";
@@ -8,8 +8,16 @@ import { WorkflowGraph } from "@/components/workflow-graph";
 import { ExecutionTrace } from "@/components/execution-trace";
 import { ProposalSelector } from "@/components/proposal-selector";
 import { RecentRuns } from "@/components/recent-runs";
-import { evaluateProposal, getHealth, getProposals, getRuns } from "./api";
-import type { ChangeProposal, GateEvaluationResult } from "./types";
+import { getHealth, getProposals, getRuns, streamEvaluation } from "./api";
+import type {
+  ChangeProposal,
+  ExecutionEvent,
+  GateEvaluationResult,
+  LiveTraceItem,
+  NodeExecutionState,
+  NodeName,
+  PipelineEdge,
+} from "./types";
 
 function ThemeToggle() {
   const { theme, toggle } = useTheme();
@@ -26,6 +34,38 @@ function ThemeToggle() {
   );
 }
 
+const INITIAL_NODE_STATES: Record<NodeName, NodeExecutionState> = {
+  inspect: "waiting",
+  checks: "waiting",
+  evaluate: "waiting",
+  apply: "waiting",
+  review: "waiting",
+  stop: "waiting",
+};
+
+function createInitialLiveTrace(): LiveTraceItem[] {
+  return [
+    {
+      step_number: 1,
+      node: "inspect",
+      state: "waiting",
+      summary: "Inspecting proposed change metadata and diff...",
+    },
+    {
+      step_number: 2,
+      node: "checks",
+      state: "waiting",
+      summary: "Waiting for automated test gates and verifications...",
+    },
+    {
+      step_number: 3,
+      node: "evaluate",
+      state: "waiting",
+      summary: "Waiting for Jev gate evaluation...",
+    },
+  ];
+}
+
 export default function App() {
   const [proposals, setProposals] = useState<ChangeProposal[]>([]);
   const [selectedProposalId, setSelectedProposalId] = useState<string>("prop-001");
@@ -36,23 +76,177 @@ export default function App() {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Evaluate action (automatically triggered)
-  const runEvaluation = async (proposalId: string) => {
-    if (!proposalId) return;
+  // Live execution states
+  const [nodeStates, setNodeStates] = useState<Record<NodeName, NodeExecutionState>>(INITIAL_NODE_STATES);
+  const [activeNode, setActiveNode] = useState<NodeName | null>(null);
+  const [traversedNodes, setTraversedNodes] = useState<string[]>([]);
+  const [traversedEdges, setTraversedEdges] = useState<PipelineEdge[]>([]);
+  const [liveTraceItems, setLiveTraceItems] = useState<LiveTraceItem[]>(createInitialLiveTrace());
+  const [terminalVerdict, setTerminalVerdict] = useState<"apply" | "review" | "stop" | undefined>(undefined);
+
+  const activeStreamCleanupRef = useRef<(() => void) | null>(null);
+
+  // Stream execution for a given proposal
+  const startLiveEvaluation = (proposalId: string) => {
+    // 1. Abort previous stream if any
+    if (activeStreamCleanupRef.current) {
+      activeStreamCleanupRef.current();
+      activeStreamCleanupRef.current = null;
+    }
+
+    // 2. Reset execution states
     setLoading(true);
     setError(null);
+    setResult(null);
+    setTerminalVerdict(undefined);
+    setTraversedNodes([]);
+    setTraversedEdges([]);
+    setActiveNode(null);
+    setNodeStates(INITIAL_NODE_STATES);
+    setLiveTraceItems(createInitialLiveTrace());
 
-    try {
-      const evaluation = await evaluateProposal(proposalId);
-      setResult(evaluation);
-      setRuns((prev) => [
-        evaluation,
-        ...prev.filter((r) => r.proposal.id !== evaluation.proposal.id),
-      ].slice(0, 20));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to evaluate change proposal");
-    } finally {
-      setLoading(false);
+    // 3. Connect to live SSE stream
+    const cleanup = streamEvaluation(
+      proposalId,
+      (event: ExecutionEvent) => {
+        handleExecutionEvent(event);
+      },
+      (err: Error) => {
+        setLoading(false);
+        setActiveNode(null);
+        setError("EXECUTION ERROR: The evaluation stream could not be completed.");
+      }
+    );
+
+    activeStreamCleanupRef.current = cleanup;
+  };
+
+  const handleExecutionEvent = (event: ExecutionEvent) => {
+    switch (event.event_type) {
+      case "run_started": {
+        setActiveNode("inspect");
+        setNodeStates((prev) => ({ ...prev, inspect: "running" }));
+        setLiveTraceItems((prev) =>
+          prev.map((item) =>
+            item.node === "inspect"
+              ? { ...item, state: "running", summary: "Inspecting proposed change..." }
+              : item
+          )
+        );
+        break;
+      }
+
+      case "node_started": {
+        if (!event.node) break;
+        const currentNode = event.node;
+        setActiveNode(currentNode);
+        setNodeStates((prev) => ({ ...prev, [currentNode]: "running" }));
+
+        setLiveTraceItems((prev) => {
+          const index = prev.findIndex((item) => item.node === currentNode);
+          if (index !== -1) {
+            const next = [...prev];
+            next[index] = { ...next[index], state: "running" };
+            return next;
+          }
+          // If terminal node starting (e.g. apply/review/stop), add as 4th item
+          return [
+            ...prev,
+            {
+              step_number: prev.length + 1,
+              node: currentNode,
+              state: "running",
+              summary: `Executing ${currentNode} action...`,
+            },
+          ];
+        });
+        break;
+      }
+
+      case "decision_made": {
+        if (event.decision) {
+          const verdict = event.decision.verdict;
+          setTerminalVerdict(verdict);
+
+          // Add terminal node waiting state to trace if not yet present
+          setLiveTraceItems((prev) => {
+            if (prev.some((item) => item.node === verdict)) return prev;
+            return [
+              ...prev,
+              {
+                step_number: prev.length + 1,
+                node: verdict,
+                state: "waiting",
+                summary: `Action routed to ${verdict}...`,
+              },
+            ];
+          });
+        }
+        break;
+      }
+
+      case "node_completed": {
+        if (!event.node) break;
+        const currentNode = event.node;
+        setNodeStates((prev) => ({ ...prev, [currentNode]: "completed" }));
+
+        if (event.traversed_nodes) {
+          setTraversedNodes(event.traversed_nodes);
+        }
+        if (event.traversed_edges) {
+          setTraversedEdges(event.traversed_edges);
+        }
+
+        if (event.step) {
+          const completedStep = event.step;
+          setLiveTraceItems((prev) => {
+            const index = prev.findIndex((item) => item.node === currentNode);
+            if (index !== -1) {
+              const next = [...prev];
+              next[index] = {
+                ...next[index],
+                state: "completed",
+                status: completedStep.status,
+                summary: completedStep.summary,
+                detail: completedStep.detail,
+                duration_ms: completedStep.duration_ms,
+                decision: completedStep.decision,
+              };
+              return next;
+            }
+            return [
+              ...prev,
+              {
+                step_number: completedStep.step_number,
+                node: currentNode,
+                state: "completed",
+                status: completedStep.status,
+                summary: completedStep.summary,
+                detail: completedStep.detail,
+                duration_ms: completedStep.duration_ms,
+                decision: completedStep.decision,
+              },
+            ];
+          });
+        }
+        break;
+      }
+
+      case "run_completed": {
+        setLoading(false);
+        setActiveNode(null);
+        if (event.result) {
+          setResult(event.result);
+          setTerminalVerdict(event.result.decision.verdict);
+          setTraversedNodes(event.result.traversed_nodes);
+          setTraversedEdges(event.result.traversed_edges);
+          setRuns((prev) => [
+            event.result!,
+            ...prev.filter((r) => r.proposal.id !== event.result!.proposal.id),
+          ].slice(0, 20));
+        }
+        break;
+      }
     }
   };
 
@@ -71,8 +265,8 @@ export default function App() {
         const firstId = fetchedProposals[0].id;
         setSelectedProposalId(firstId);
         setSelectedFile(fetchedProposals[0].changed_files[0]);
-        // Automatically evaluate the initial change on load
-        runEvaluation(firstId);
+        // Immediately start live execution for initial proposal
+        startLiveEvaluation(firstId);
       }
       if (fetchedRuns.length > 0) {
         setRuns(fetchedRuns);
@@ -84,6 +278,9 @@ export default function App() {
 
     return () => {
       mounted = false;
+      if (activeStreamCleanupRef.current) {
+        activeStreamCleanupRef.current();
+      }
     };
   }, []);
 
@@ -92,21 +289,49 @@ export default function App() {
     return proposals.find((p) => p.id === selectedProposalId) ?? proposals[0] ?? null;
   }, [proposals, selectedProposalId]);
 
-  // Handle switching proposals: immediately evaluates
+  // Handle switching proposals: resets immediately and triggers live evaluation
   const handleSelectProposal = (id: string) => {
     setSelectedProposalId(id);
     const p = proposals.find((item) => item.id === id);
     if (p && p.changed_files.length > 0) {
       setSelectedFile(p.changed_files[0]);
     }
-    runEvaluation(id);
+    startLiveEvaluation(id);
   };
 
   // Select historical run
   const handleSelectRun = (run: GateEvaluationResult) => {
+    if (activeStreamCleanupRef.current) {
+      activeStreamCleanupRef.current();
+      activeStreamCleanupRef.current = null;
+    }
     setSelectedProposalId(run.proposal.id);
     setSelectedFile(run.proposal.changed_files[0]);
     setResult(run);
+    setLoading(false);
+    setActiveNode(null);
+    setTerminalVerdict(run.decision.verdict);
+    setTraversedNodes(run.traversed_nodes);
+    setTraversedEdges(run.traversed_edges);
+
+    // Populate completed node states and trace items
+    const completedStates = { ...INITIAL_NODE_STATES };
+    run.traversed_nodes.forEach((n) => {
+      completedStates[n as NodeName] = "completed";
+    });
+    setNodeStates(completedStates);
+
+    const historyTraceItems: LiveTraceItem[] = run.trace.map((s) => ({
+      step_number: s.step_number,
+      node: s.node,
+      state: "completed",
+      status: s.status,
+      summary: s.summary,
+      detail: s.detail,
+      duration_ms: s.duration_ms,
+      decision: s.decision,
+    }));
+    setLiveTraceItems(historyTraceItems);
   };
 
   return (
@@ -176,24 +401,29 @@ export default function App() {
             )}
           </section>
 
-          {/* RIGHT: EXECUTION, WORKFLOW GRAPH, AND TRACE (~60%) */}
+          {/* RIGHT: LIVE EXECUTION, WORKFLOW GRAPH, AND TRACE (~60%) */}
           <section className="lg:col-span-7 space-y-5">
-            {/* Decision Panel */}
+            {/* Live Decision Panel */}
             <DecisionPanel
               decision={result ? result.decision : null}
               loading={loading}
-              onReevaluate={() => runEvaluation(selectedProposalId)}
+              onReevaluate={() => startLiveEvaluation(selectedProposalId)}
             />
 
-            {/* Large Workflow Graph (~400-500px height area) */}
+            {/* Live Workflow Graph with nodeStates (waiting, running, completed) */}
             <WorkflowGraph
-              traversedNodes={result?.traversed_nodes ?? []}
-              traversedEdges={result?.traversed_edges ?? []}
-              terminalVerdict={result?.decision.verdict}
+              traversedNodes={traversedNodes}
+              traversedEdges={traversedEdges}
+              terminalVerdict={terminalVerdict}
+              nodeStates={nodeStates}
+              activeNode={activeNode}
             />
 
-            {/* Large Execution Trace with comfortable padding */}
-            <ExecutionTrace steps={result?.trace ?? []} />
+            {/* Live Synchronized Execution Trace */}
+            <ExecutionTrace
+              items={liveTraceItems}
+              isRunning={loading}
+            />
           </section>
         </div>
 

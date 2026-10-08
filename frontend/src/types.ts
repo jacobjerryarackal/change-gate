@@ -65,3 +65,37 @@ export interface HealthInfo {
   service: string;
   provider: string;
 }
+
+export type NodeExecutionState = "waiting" | "running" | "completed";
+
+export type ExecutionEventType =
+  | "run_started"
+  | "node_started"
+  | "node_completed"
+  | "decision_made"
+  | "run_completed";
+
+export interface ExecutionEvent {
+  event_type: ExecutionEventType;
+  run_id: string;
+  node?: NodeName;
+  proposal_id?: string;
+  step?: TraceStep;
+  decision?: Decision;
+  traversed_nodes?: string[];
+  traversed_edges?: PipelineEdge[];
+  sequence?: number;
+  timestamp?: number;
+  result?: GateEvaluationResult;
+}
+
+export interface LiveTraceItem {
+  step_number: number;
+  node: NodeName;
+  state: NodeExecutionState;
+  summary: string;
+  detail?: string;
+  duration_ms?: number;
+  status?: StepStatus;
+  decision?: Decision | null;
+}
