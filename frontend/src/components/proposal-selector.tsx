@@ -28,7 +28,7 @@ export function ProposalSelector({
         htmlFor="change-select"
         className="block font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground"
       >
-        Select Change for Review
+        SELECT CHANGE FOR REVIEW
       </label>
       <div className="relative">
         <GitPullRequest className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />

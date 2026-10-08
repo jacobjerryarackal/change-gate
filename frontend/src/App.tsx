@@ -7,8 +7,7 @@ import { DecisionPanel } from "@/components/decision-panel";
 import { WorkflowGraph } from "@/components/workflow-graph";
 import { ExecutionTrace } from "@/components/execution-trace";
 import { ProposalSelector } from "@/components/proposal-selector";
-import { RecentRuns } from "@/components/recent-runs";
-import { getHealth, getProposals, getRuns, streamEvaluation } from "./api";
+import { getHealth, getProposals, streamEvaluation } from "./api";
 import type {
   ChangeProposal,
   ExecutionEvent,
@@ -71,7 +70,6 @@ export default function App() {
   const [selectedProposalId, setSelectedProposalId] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<string | undefined>(undefined);
   const [result, setResult] = useState<GateEvaluationResult | null>(null);
-  const [runs, setRuns] = useState<GateEvaluationResult[]>([]);
   const [provider, setProvider] = useState<string>("mock");
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -240,10 +238,6 @@ export default function App() {
           setTerminalVerdict(event.result.decision.verdict);
           setTraversedNodes(event.result.traversed_nodes);
           setTraversedEdges(event.result.traversed_edges);
-          setRuns((prev) => [
-            event.result!,
-            ...prev.filter((r) => r.proposal.id !== event.result!.proposal.id),
-          ].slice(0, 20));
         }
         break;
       }
@@ -256,15 +250,11 @@ export default function App() {
 
     Promise.all([
       getProposals().catch(() => []),
-      getRuns().catch(() => []),
       getHealth().catch(() => ({ provider: "mock", service: "ChangeGate", status: "ok" })),
-    ]).then(([fetchedProposals, fetchedRuns, health]) => {
+    ]).then(([fetchedProposals, health]) => {
       if (!mounted) return;
       if (fetchedProposals.length > 0) {
         setProposals(fetchedProposals);
-      }
-      if (fetchedRuns.length > 0) {
-        setRuns(fetchedRuns);
       }
       if (health?.provider) {
         setProvider(health.provider);
@@ -295,55 +285,20 @@ export default function App() {
     startLiveEvaluation(id);
   };
 
-  // Select historical run
-  const handleSelectRun = (run: GateEvaluationResult) => {
-    if (activeStreamCleanupRef.current) {
-      activeStreamCleanupRef.current();
-      activeStreamCleanupRef.current = null;
-    }
-    setSelectedProposalId(run.proposal.id);
-    setSelectedFile(run.proposal.changed_files[0]);
-    setResult(run);
-    setLoading(false);
-    setActiveNode(null);
-    setTerminalVerdict(run.decision.verdict);
-    setTraversedNodes(run.traversed_nodes);
-    setTraversedEdges(run.traversed_edges);
-
-    // Populate completed node states and trace items
-    const completedStates = { ...INITIAL_NODE_STATES };
-    run.traversed_nodes.forEach((n) => {
-      completedStates[n as NodeName] = "completed";
-    });
-    setNodeStates(completedStates);
-
-    const historyTraceItems: LiveTraceItem[] = run.trace.map((s) => ({
-      step_number: s.step_number,
-      node: s.node,
-      state: "completed",
-      status: s.status,
-      summary: s.summary,
-      detail: s.detail,
-      duration_ms: s.duration_ms,
-      decision: s.decision,
-    }));
-    setLiveTraceItems(historyTraceItems);
-  };
-
   return (
     <div className="min-h-screen bg-background text-foreground antialiased selection:bg-muted selection:text-foreground">
       {/* 1. Minimal Header */}
       <header className="sticky top-0 z-10 border-b border-border bg-background/95 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6">
-          <div className="flex items-center gap-2.5">
-            <div className="flex size-7 items-center justify-center rounded border border-border bg-card">
-              <Shield className="size-4 text-foreground" />
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3.5 sm:px-6">
+          <div className="flex items-center gap-3">
+            <div className="flex size-9 items-center justify-center rounded border border-border bg-card shadow-xs">
+              <Shield className="size-5 text-foreground" />
             </div>
             <div>
-              <h1 className="text-sm font-semibold tracking-tight leading-none text-foreground">
+              <h1 className="text-[21px] font-semibold tracking-tight leading-none text-foreground">
                 ChangeGate
               </h1>
-              <p className="mt-0.5 text-[11px] font-mono text-muted-foreground leading-none">
+              <p className="mt-1 text-[14px] font-mono text-muted-foreground leading-none">
                 Autonomous change review
               </p>
             </div>
@@ -374,7 +329,7 @@ export default function App() {
           <section className="lg:col-span-5 space-y-4">
             <div className="border-b border-border/60 pb-2">
               <h2 className="font-mono text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                Change Under Review
+                CHANGE UNDER REVIEW
               </h2>
             </div>
 
@@ -395,53 +350,53 @@ export default function App() {
                 onSelectFile={setSelectedFile}
               />
             ) : (
-              <div className="rounded border border-dashed border-border/80 bg-card/20 p-6 text-center">
-                <span className="font-mono text-xs text-muted-foreground">
+              <div className="rounded border border-border/80 bg-card/40 p-5 space-y-1.5">
+                <div className="font-mono text-xs font-semibold text-foreground">
                   Select a change to begin
-                </span>
+                </div>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Choose a proposed change to inspect its diff and run the decision gate.
+                </p>
               </div>
             )}
           </section>
 
           {/* RIGHT: LIVE EXECUTION, WORKFLOW GRAPH, AND TRACE (~60%) */}
           <section className="lg:col-span-7 space-y-5">
-            {/* Live Decision Panel */}
-            <DecisionPanel
-              decision={result ? result.decision : null}
-              loading={loading}
-              onReevaluate={
-                selectedProposalId
-                  ? () => startLiveEvaluation(selectedProposalId)
-                  : undefined
-              }
-            />
+            {selectedProposalId ? (
+              <>
+                {/* Live Decision Panel */}
+                <DecisionPanel
+                  decision={result ? result.decision : null}
+                  loading={loading}
+                  onReevaluate={() => startLiveEvaluation(selectedProposalId)}
+                />
 
-            {/* Live Workflow Graph with nodeStates (waiting, running, completed) */}
-            <WorkflowGraph
-              hasSelection={Boolean(selectedProposalId)}
-              traversedNodes={traversedNodes}
-              traversedEdges={traversedEdges}
-              terminalVerdict={terminalVerdict}
-              nodeStates={nodeStates}
-              activeNode={activeNode}
-            />
+                {/* Live Workflow Graph with nodeStates (waiting, running, completed) */}
+                <WorkflowGraph
+                  hasSelection={true}
+                  traversedNodes={traversedNodes}
+                  traversedEdges={traversedEdges}
+                  terminalVerdict={terminalVerdict}
+                  nodeStates={nodeStates}
+                  activeNode={activeNode}
+                />
 
-            {/* Live Synchronized Execution Trace */}
-            <ExecutionTrace
-              items={liveTraceItems}
-              isRunning={loading}
-            />
+                {/* Live Synchronized Execution Trace */}
+                <ExecutionTrace
+                  items={liveTraceItems}
+                  isRunning={loading}
+                />
+              </>
+            ) : (
+              <div className="rounded border border-border/80 bg-card/40 min-h-[560px] flex flex-col items-center justify-center p-8 text-center">
+                <span className="font-mono text-xs text-muted-foreground">
+                  Select a change to begin
+                </span>
+              </div>
+            )}
           </section>
         </div>
-
-        {/* Compact Recent Evaluations strip at bottom */}
-        <section className="pt-2 border-t border-border/40">
-          <RecentRuns
-            runs={runs}
-            onSelectRun={handleSelectRun}
-            activeRunProposalId={result?.proposal.id}
-          />
-        </section>
       </main>
     </div>
   );
