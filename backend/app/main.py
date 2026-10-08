@@ -1,8 +1,10 @@
-"""FastAPI application for ChangeGate."""
-
+import asyncio
+import json
 import time
+import uuid
 from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from . import config
 from .fixtures import DEMO_PROPOSALS
@@ -74,6 +76,147 @@ def evaluate_proposal(req: EvaluationRequest) -> GateEvaluationResult:
     _runs.insert(0, result)
     del _runs[_MAX_LOG:]
     return result
+
+
+async def stream_proposal_evaluation(proposal: ChangeProposal):
+    """Executes proposal evaluation while yielding SSE execution events."""
+    run_id = f"run-{uuid.uuid4().hex[:8]}"
+    seq = 0
+
+    def sse(event_type: str, data: dict) -> str:
+        return f"event: {event_type}\ndata: {json.dumps(data, default=str)}\n\n"
+
+    # 1. run_started
+    seq += 1
+    yield sse("run_started", {
+        "event_type": "run_started",
+        "run_id": run_id,
+        "proposal_id": proposal.id,
+        "sequence": seq,
+        "timestamp": time.time(),
+    })
+    await asyncio.sleep(0.15)
+
+    provider = get_provider(config.JEV_PROVIDER)
+    graph = build_graph(provider)
+    state = initial_state(proposal)
+
+    for step in graph.stream(state):
+        node_name = list(step.keys())[0]
+        node_state = step[node_name]
+
+        # 2. node_started
+        seq += 1
+        yield sse("node_started", {
+            "event_type": "node_started",
+            "run_id": run_id,
+            "node": node_name,
+            "sequence": seq,
+            "timestamp": time.time(),
+        })
+        # Visual dwell time so user can observe execution progress
+        await asyncio.sleep(0.3)
+
+        # Node trace step produced
+        step_trace = node_state["trace"][-1] if node_state.get("trace") else None
+        step_trace_dict = step_trace.model_dump() if step_trace else None
+
+        # Emit decision_made event when evaluate produces decision
+        if node_name == "evaluate" and node_state.get("decision"):
+            seq += 1
+            decision_dict = node_state["decision"].model_dump()
+            yield sse("decision_made", {
+                "event_type": "decision_made",
+                "run_id": run_id,
+                "node": "evaluate",
+                "decision": decision_dict,
+                "sequence": seq,
+                "timestamp": time.time(),
+            })
+            await asyncio.sleep(0.2)
+
+        # 3. node_completed
+        seq += 1
+        yield sse("node_completed", {
+            "event_type": "node_completed",
+            "run_id": run_id,
+            "node": node_name,
+            "step": step_trace_dict,
+            "traversed_nodes": node_state.get("traversed_nodes", []),
+            "traversed_edges": node_state.get("traversed_edges", []),
+            "sequence": seq,
+            "timestamp": time.time(),
+        })
+        await asyncio.sleep(0.2)
+
+        state = node_state
+
+    # 4. run_completed
+    if state.get("decision"):
+        result = GateEvaluationResult(
+            proposal=state["proposal"],
+            trace=state["trace"],
+            decision=state["decision"],
+            traversed_nodes=state["traversed_nodes"],
+            traversed_edges=state["traversed_edges"],
+        )
+        _runs.insert(0, result)
+        del _runs[_MAX_LOG:]
+
+        seq += 1
+        yield sse("run_completed", {
+            "event_type": "run_completed",
+            "run_id": run_id,
+            "sequence": seq,
+            "timestamp": time.time(),
+            "result": result.model_dump(),
+        })
+
+
+@router.get("/evaluate/stream")
+async def evaluate_proposal_stream(proposal_id: str | None = None) -> StreamingResponse:
+    """Streams live execution events for a change proposal via SSE."""
+    proposal: ChangeProposal | None = None
+    if proposal_id:
+        proposal = next((p for p in DEMO_PROPOSALS if p.id == proposal_id), None)
+        if not proposal:
+            raise HTTPException(status_code=404, detail=f"Proposal '{proposal_id}' not found")
+    else:
+        proposal = DEMO_PROPOSALS[0]
+
+    return StreamingResponse(
+        stream_proposal_evaluation(proposal),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/evaluate/stream")
+async def evaluate_proposal_stream_post(req: EvaluationRequest) -> StreamingResponse:
+    """Streams live execution events for an evaluation request via SSE."""
+    proposal: ChangeProposal | None = None
+    if req.proposal:
+        proposal = req.proposal
+    elif req.proposal_id:
+        proposal = next((p for p in DEMO_PROPOSALS if p.id == req.proposal_id), None)
+        if not proposal:
+            raise HTTPException(status_code=404, detail=f"Proposal '{req.proposal_id}' not found")
+    else:
+        proposal = DEMO_PROPOSALS[0]
+
+    return StreamingResponse(
+        stream_proposal_evaluation(proposal),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/runs", response_model=list[GateEvaluationResult])
