@@ -1,132 +1,111 @@
-# JevLangGraph
+# ChangeGate
 
-A real [LangGraph](https://github.com/langchain-ai/langgraph) agent where **Jev, not an LLM, decides what to do next at every branch point**: `continue` (think one more step), `search`, `use_tool`, `retry`, `finish`, or `escalate` to a human.
+A confidence aware decision gate for autonomous software changes. It evaluates a proposed change and routes it to automatic application, human review, or stop.
 
+## Demo
+
+Production URL: https://change-gate.vercel.app
+
+The web interface displays:
+- **Change Under Review**: Proposal metadata, touched files, and unified git diff.
+- **Workflow Traversal**: Graph visualization highlighting the active path through the pipeline.
+- **Decision**: Final gate routing (`Apply`, `Review Required`, or `Stopped`) with rationale.
+- **Execution Trace**: Chronological audit log showing node latencies and execution steps.
+
+## What it does
+
+Autonomous coding systems can make changes successfully from a technical perspective while still making the wrong decision about whether a change should be applied automatically.
+
+ChangeGate separates workflow execution from the decision gate and routes changes to:
+- **Apply**: Safe changes meeting all automated checks and confidence thresholds, applied automatically.
+- **Review**: High-risk, ambiguous, or architectural changes requiring human engineering sign-off.
+- **Stop**: Changes causing test failures or violating safety policies, halted immediately.
+
+## How it works
+
+ChangeGate runs an explicit LangGraph flow:
+
+```text
+inspect -> checks -> evaluate -> apply / review / stop
 ```
-query -> decide (Jev) -> search / use_tool / retry / finish / escalate -> back to decide -> ...
-```
 
-Fourth in the [Jev projects](../) series. Same conventions: FastAPI + Vite/React/shadcn, mock-first, zero cost by default.
+LangGraph controls explicit workflow traversal, and the decision provider supplies the bounded evaluation used by the gate:
+1. `inspect`: Inspects change metadata, touched paths, and change type.
+2. `checks`: Executes automated verifications (syntax, test suite, static checks).
+3. `evaluate`: Evaluates safety, policy compliance, and risk to determine the routing outcome.
+4. `apply` / `review` / `stop`: Terminal nodes reached according to the gate's decision.
 
-## Why this, specifically
+The system is not an autonomous agent or chatbot; it is a deterministic workflow with a bounded decision step. Execution events are streamed to the client in real time via Server-Sent Events (SSE).
 
-Most agent frameworks put an LLM call at every fork: "should I search, use a tool, or answer now?" is itself a prompt. That's slow and expensive for a decision that's often not open-ended reasoning — it's a bounded classification over a handful of options, which is exactly what Jev is built for. This project swaps that LLM call for one typed `Choice` question per branch point, and keeps everything else (the actual search/tool execution) as real, if simulated, work.
-
-**No LLM calls anywhere in this project.** The graph nodes are genuine: `use_tool` runs a real, safe arithmetic evaluator (Python's `ast`, not `eval`) on expressions actually present in the query; `search` is a small deterministic lookup table standing in for retrieval. The only thing being demonstrated is the *control flow* — which is the part the original brief asked Jev to own.
-
-## The graph
-
-Built with `langgraph`'s `StateGraph` (`backend/app/graph.py`) — not a hand-rolled state machine dressed up to look like one:
+## Architecture
 
 ```mermaid
 flowchart TD
-    decide{decide<br/>Jev picks one} -->|continue| decide
-    decide -->|search| search[search]
-    decide -->|use_tool| use_tool[use_tool]
-    decide -->|retry| retry[retry]
-    decide -->|finish| finish((finish))
-    decide -->|escalate| escalate((escalate))
-    search --> decide
-    use_tool --> decide
-    retry --> decide
+    A[Change Proposal] --> B[Inspect]
+    B --> C[Automated Checks]
+    C --> D[Evaluate]
+    D --> E{Decision Gate}
+
+    E -->|Safe| F[Apply]
+    E -->|Uncertain| G[Human Review]
+    E -->|Unsafe| H[Stop]
+
+    F --> I[Execution Trace]
+    G --> I
+    H --> I
 ```
 
-A hard step-budget (`MAX_TOTAL_STEPS = 10`) forces escalation if the graph doesn't converge, so a run can never hang.
+## Scenarios
 
-## Demo scenarios
+The repository includes five predefined test proposals exercising each gate route:
 
-Five queries, each exercising a different path — all 6 of Jev's possible decisions appear across the set:
+| Proposal | Description | Expected Decision | Terminal Node |
+|---|---|---|---|
+| **CHANGE-001** | Safe Docstring & Type Annotation Fix | `Apply` | `apply` |
+| **CHANGE-002** | Patch Dependency Bump (`httpx`) | `Apply` | `apply` |
+| **CHANGE-003** | Database Column Deprecation | `Review Required` | `review` |
+| **CHANGE-004** | Refactoring with Broken Tests | `Stopped` | `stop` |
+| **CHANGE-005** | Unsanitized Security Auth Bypass | `Stopped` | `stop` |
 
-| Category | Query | Path |
-|---|---|---|
-| Pure calculation | "What is 47 * 68?" | decide → use_tool → decide → finish |
-| Pure search | "What is the latest stable version of Python?" | decide → search → decide → finish |
-| Search + tool | "What is the capital of France? Also calculate 128 + 256." | decide → search → decide → use_tool → decide → finish |
-| Search fails, retries | "Look up today's exchange rate and convert 100 USD to EUR." | decide → search **(fails)** → decide → retry → decide → search → decide → finish |
-| Escalates to human | "Should I accept a job offer with lower pay but a team I like more?" | decide → decide → decide → escalate |
+## Local Development
 
-The "search fails, retries" scenario's failure is deterministic (the exchange-rate lookup fails specifically on its first attempt), not random — the demo is reproducible, not flaky-by-luck.
+### Prerequisites
+- Python 3.11+
+- Node.js 18+
 
-## Visualizing the graph and the trace
-
-The dashboard shows two things together: a static diagram of the whole graph with the nodes and edges *this run actually used* highlighted in color (everything else fades to gray), and a numbered step-by-step trace below it showing Jev's actual choice, confidence, and latency at every `decide` call. The diagram answers "what's the graph's shape"; the trace answers "what exactly happened, in order" — a loopy graph can't show visit order on its own.
-
-## Providers
-
-Same three-provider abstraction as the rest of the series (`mock` default / `typesafe` / `jev_agent` — see [JevGuard's README](../jev-guard/README.md#providers)). The mock provider reads the **structured state dict** the `decide` node builds (query, prior steps, retry/reasoning counters) rather than parsing raw text — real Jev accepts structured JSON state the same way, so this isn't a mock-only shortcut.
-
-## Setup
-
+### Backend Setup
 ```bash
-cp .env.example .env   # defaults to JEV_PROVIDER=mock, no key needed
-
-# backend
 cd backend
-python -m venv .venv && .venv/Scripts/activate  # .venv/bin/activate on macOS/Linux
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --port 8003
+```
 
-# frontend (separate shell)
+### Frontend Setup
+```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-Or via Docker Compose from the project root:
+The frontend dev server runs at `http://localhost:5176` and proxies `/api` to `http://localhost:8003`.
 
-```bash
-docker compose up --build
-```
-
-Dashboard at `http://localhost:5176` (host), API at `http://localhost:8003` (host) — see `docker-compose.yml` for the port mapping.
-
-## Tests
-
+### Tests
 ```bash
 cd backend
 pytest
 ```
 
-Covers: the real arithmetic evaluator and the search lookup (including its deterministic failure), every demo scenario's expected path end-to-end, that the graph always terminates within the step budget, and a regression test for a bug caught while capturing screenshots (below).
-
-## A bug this caught
-
-The `retry` node's message originally read `retrying after failed 'decide'` — because it grabbed `steps[-1]`, which by construction is always the `decide` step that just chose "retry," not the action that actually failed. Fixed by searching backward for the most recent step with `failed=True`. Caught by actually reading the execution trace in the browser rather than just checking that the graph reached the right final node — the path was correct, the human-readable explanation of *why* was wrong. There's a regression test for it (`test_flaky_search_triggers_a_real_retry_then_succeeds`).
-
 ## Deployment
 
-Deploys as a single Vercel project — import this repo, no configuration needed. `vercel.json` sets `buildCommand`/`outputDirectory` for the Vite frontend (Vercel's documented convention: the output directory's contents serve at the site root) and `framework: null` to stop any dashboard-detected framework preset from interfering, regardless of what's shown in the project's own Settings. `api/index.py` is auto-detected as a Python serverless function independent of the static build config — zero extra configuration needed for that part.
+- **Frontend**: Hosted on Vercel (`frontend/` root directory, single-page application fallback).
+- **Backend**: Hosted on Render (`backend/` web service running Uvicorn).
+- Real-time updates use HTTP Server-Sent Events (`/api/evaluate/stream`).
 
-Several things that took a few iterations to get right, worth knowing if you fork this:
-- **`api/app` is a real copy of `backend/app`, not an import across directories.** Vercel's Python bundler doesn't reliably include files outside a function's own directory, and a `sys.path` reach into the sibling `backend/` folder was the actual cause of an early deploy's 500 errors. Run `scripts/sync-api.sh` after changing anything in `backend/app/` and before deploying.
-- **`api/index.py` explicitly adds its own directory to `sys.path`.** Vercel loads it via `importlib`, not as a directly-run script — Python doesn't auto-add the file's own directory to the path for that loading mechanism. A local test can pass anyway if it happens to run from within `api/` (the shell's cwd fills the gap `importlib` doesn't), which is exactly how an earlier local verification gave a false pass.
-- **`framework: null` in `vercel.json`, explicitly.** A dashboard-auto-detected Framework Preset can silently override `buildCommand`/`outputDirectory` even after they're set in `vercel.json` — the leading suspect for the root URL 404ing while `/api/*` worked fine on an earlier deploy attempt. Setting `framework: null` forces `vercel.json` to be authoritative regardless of what the project's own Settings page shows.
-- **Only `pyproject.toml` for the deployed function — no `requirements.txt` at the root or in `api/`.** Both a `.python-version` file and `pyproject.toml`'s `requires-python` were ignored as long as a `requirements.txt` sat next to them — dependency resolution apparently took the `requirements.txt` path and never consulted `pyproject.toml` for anything, version pin included, defaulting to a Python version too new for a pinned dependency's compiled wheels. Removing `requirements.txt` for the deployed function entirely (kept in `backend/` for local dev/Docker, untouched) and listing dependencies directly in `pyproject.toml` is what made `requires-python` take effect.
-- **`vercel.json`'s `build.env.PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1`** is kept as a safety net even with the version pin working — harmless when the pinned version already has a prebuilt wheel (no compilation happens at all in that case).
-- **`config.py` treats a present-but-empty env var the same as an unset one.** `os.environ.get(key, default)` only falls back when the key is missing entirely; a blank value (e.g. an env var added in the Vercel dashboard with no value typed in) passes straight through to whatever consumes it. Confirmed via a real production crash on this pattern, not hypothetical.
+## Providers
 
-`api/index.py` mounts the app under `/api` with zero route changes in `app/main.py` itself, so the frontend's relative `/api/*` calls work on the same domain with no separate API URL to configure.
-
-Defaults to `JEV_PROVIDER=mock` (no environment variables required to deploy). To run the deployed demo against a real Jev key, set `TYPESAFE_API_KEY` or `JEV_AGENT_KEY` and `JEV_PROVIDER` in the Vercel project's environment variables — see `.env.example`.
-
-No persistence beyond the in-memory run log.
-
-## Screenshots
-
-**Dashboard** — the search-fails-and-retries scenario, graph diagram with the traversed path highlighted, full execution trace:
-
-![JevLangGraph dashboard](docs/dashboard.png)
-
-**Escalation scenario** — an ambiguous, subjective query: Jev chooses `continue` twice (thinking, no clear action available), then `escalate`:
-
-![Escalate scenario showing the continue loop and escalate path](docs/escalate-scenario.png)
-
-**Live Jev output** — the pure-calculation scenario run against the real API (`JEV_PROVIDER=jev_agent`, not mock): Jev picks `use_tool` at 97% confidence (1074.9ms) then `finish` at 100% confidence (805.6ms), real network latency included:
-
-![Live graph run using the real jev_agent provider](docs/calculation-scenario-live.png)
-
-## Limitations
-
-- `search` is a small keyword lookup table, not real retrieval — it demonstrates the control-flow pattern, not a production search integration.
-- The mock provider's decisions are keyword/state heuristics, same caveat as the rest of the series: its accuracy reflects the mock, not real Jev's actual judgment. Flip to a live provider to see the real thing.
-- Five demo scenarios were chosen to hit all 6 possible decisions at least once; this isn't an exhaustive test of every graph path (e.g. an escalate-after-exhausted-retries path exists in the code but isn't separately demoed).
+Configured via the `JEV_PROVIDER` environment variable:
+- `mock` (default): Deterministic local evaluator with no external dependencies.
+- `typesafe`: TypeSafe AI Jev API (`https://api.typesafe.ai/v1/systemone`). Requires `TYPESAFE_API_KEY`.
+- `jev_agent`: Relay service (`https://jev-agent.com/api/v1/systemone`). Requires `JEV_AGENT_KEY`.
