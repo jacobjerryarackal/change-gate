@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, Loader2, Moon, Play, Shield, Sun } from "lucide-react";
+import { AlertCircle, Shield, Sun, Moon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/lib/use-theme";
 import { ChangeOverview } from "@/components/change-overview";
@@ -34,8 +34,27 @@ export default function App() {
   const [runs, setRuns] = useState<GateEvaluationResult[]>([]);
   const [provider, setProvider] = useState<string>("mock");
   const [loading, setLoading] = useState<boolean>(false);
-  const [initialLoading, setInitialLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Evaluate action (automatically triggered)
+  const runEvaluation = async (proposalId: string) => {
+    if (!proposalId) return;
+    setLoading(true);
+    setError(null);
+
+    try {
+      const evaluation = await evaluateProposal(proposalId);
+      setResult(evaluation);
+      setRuns((prev) => [
+        evaluation,
+        ...prev.filter((r) => r.proposal.id !== evaluation.proposal.id),
+      ].slice(0, 20));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to evaluate change proposal");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Initial load
   useEffect(() => {
@@ -49,17 +68,18 @@ export default function App() {
       if (!mounted) return;
       if (fetchedProposals.length > 0) {
         setProposals(fetchedProposals);
-        setSelectedProposalId(fetchedProposals[0].id);
+        const firstId = fetchedProposals[0].id;
+        setSelectedProposalId(firstId);
         setSelectedFile(fetchedProposals[0].changed_files[0]);
+        // Automatically evaluate the initial change on load
+        runEvaluation(firstId);
       }
       if (fetchedRuns.length > 0) {
         setRuns(fetchedRuns);
-        setResult(fetchedRuns[0]);
       }
       if (health?.provider) {
         setProvider(health.provider);
       }
-      setInitialLoading(false);
     });
 
     return () => {
@@ -72,37 +92,14 @@ export default function App() {
     return proposals.find((p) => p.id === selectedProposalId) ?? proposals[0] ?? null;
   }, [proposals, selectedProposalId]);
 
-  // Handle switching proposals
+  // Handle switching proposals: immediately evaluates
   const handleSelectProposal = (id: string) => {
     setSelectedProposalId(id);
     const p = proposals.find((item) => item.id === id);
     if (p && p.changed_files.length > 0) {
       setSelectedFile(p.changed_files[0]);
     }
-    // Check if we have an existing recent evaluation for this proposal
-    const existingRun = runs.find((r) => r.proposal.id === id);
-    if (existingRun) {
-      setResult(existingRun);
-    } else {
-      setResult(null);
-    }
-  };
-
-  // Evaluate action
-  const handleEvaluate = async () => {
-    if (!selectedProposalId) return;
-    setLoading(true);
-    setError(null);
-
-    try {
-      const evaluation = await evaluateProposal(selectedProposalId);
-      setResult(evaluation);
-      setRuns((prev) => [evaluation, ...prev.filter((r) => r.proposal.id !== evaluation.proposal.id)].slice(0, 20));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to evaluate change proposal");
-    } finally {
-      setLoading(false);
-    }
+    runEvaluation(id);
   };
 
   // Select historical run
@@ -114,7 +111,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-background text-foreground antialiased selection:bg-muted selection:text-foreground">
-      {/* Engineering Header */}
+      {/* 1. Minimal Header */}
       <header className="sticky top-0 z-10 border-b border-border bg-background/95 backdrop-blur-sm">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6">
           <div className="flex items-center gap-2.5">
@@ -131,45 +128,16 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-3">
-            {proposals.length > 0 && (
-              <ProposalSelector
-                proposals={proposals}
-                selectedId={selectedProposalId}
-                onSelect={handleSelectProposal}
-                disabled={loading}
-              />
-            )}
-
-            <Button
-              onClick={handleEvaluate}
-              disabled={loading || initialLoading}
-              size="sm"
-              className="h-8 gap-1.5 px-3 font-mono text-xs font-medium"
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="size-3.5 animate-spin" />
-                  <span>Evaluating...</span>
-                </>
-              ) : (
-                <>
-                  <Play className="size-3.5 fill-current" />
-                  <span>Evaluate</span>
-                </>
-              )}
-            </Button>
-
-            <span className="hidden sm:inline-flex items-center rounded border border-border px-2 py-1 font-mono text-[11px] text-muted-foreground bg-muted/40">
+          <div className="flex items-center gap-3">
+            <span className="inline-flex items-center rounded border border-border px-2.5 py-1 font-mono text-[11px] text-muted-foreground bg-muted/40">
               provider: {provider}
             </span>
-
             <ThemeToggle />
           </div>
         </div>
       </header>
 
-      {/* Main Workspace */}
+      {/* Main Workspace with 40% (left) / 60% (right) proportion */}
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 space-y-6">
         {/* Error Alert */}
         {error && (
@@ -179,70 +147,57 @@ export default function App() {
           </div>
         )}
 
-        {/* 2-Column Desktop Grid */}
+        {/* 2-Column Desktop Grid: Left 41.7% (col-span-5) / Right 58.3% (col-span-7) */}
         <div className="grid gap-6 lg:grid-cols-12 items-start">
-          {/* Left Column: Change Under Review (58% / 7 cols) */}
-          <section className="lg:col-span-7 space-y-4">
-            <div className="flex items-center justify-between pb-1 border-b border-border/60">
-              <span className="font-mono text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          {/* LEFT: CHANGE UNDER REVIEW (~40%) */}
+          <section className="lg:col-span-5 space-y-4">
+            <div className="border-b border-border/60 pb-2">
+              <h2 className="font-mono text-xs font-bold uppercase tracking-wider text-muted-foreground">
                 Change Under Review
-              </span>
-              {currentProposal && (
-                <span className="font-mono text-[11px] text-muted-foreground">
-                  {currentProposal.target_branch} ← {currentProposal.author_id}
-                </span>
-              )}
+              </h2>
             </div>
 
-            {currentProposal ? (
+            {/* Proposal Selection in Workspace */}
+            {proposals.length > 0 && (
+              <ProposalSelector
+                proposals={proposals}
+                selectedId={selectedProposalId}
+                onSelect={handleSelectProposal}
+                disabled={loading}
+              />
+            )}
+
+            {currentProposal && (
               <ChangeOverview
                 proposal={currentProposal}
                 selectedFile={selectedFile}
                 onSelectFile={setSelectedFile}
               />
-            ) : initialLoading ? (
-              <div className="rounded border p-8 text-center font-mono text-xs text-muted-foreground">
-                Loading proposals...
-              </div>
-            ) : (
-              <div className="rounded border border-dashed p-8 text-center font-mono text-xs text-muted-foreground">
-                No change proposal selected.
-              </div>
             )}
           </section>
 
-          {/* Right Column: Execution & Gate Traversal (42% / 5 cols) */}
-          <section className="lg:col-span-5 space-y-4">
-            <div className="flex items-center justify-between pb-1 border-b border-border/60">
-              <span className="font-mono text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Gate Execution
-              </span>
-              {result && (
-                <span className="font-mono text-[11px] text-muted-foreground">
-                  {result.trace.length} steps executed
-                </span>
-              )}
-            </div>
-
-            {/* Decision Outcome */}
+          {/* RIGHT: EXECUTION, WORKFLOW GRAPH, AND TRACE (~60%) */}
+          <section className="lg:col-span-7 space-y-5">
+            {/* Decision Panel */}
             <DecisionPanel
               decision={result ? result.decision : null}
               loading={loading}
+              onReevaluate={() => runEvaluation(selectedProposalId)}
             />
 
-            {/* Workflow Graph Traversal */}
+            {/* Large Workflow Graph (~400-500px height area) */}
             <WorkflowGraph
               traversedNodes={result?.traversed_nodes ?? []}
               traversedEdges={result?.traversed_edges ?? []}
               terminalVerdict={result?.decision.verdict}
             />
 
-            {/* Chronological Execution Trace */}
+            {/* Large Execution Trace with comfortable padding */}
             <ExecutionTrace steps={result?.trace ?? []} />
           </section>
         </div>
 
-        {/* Compact Recent Runs Strip at Bottom */}
+        {/* Compact Recent Evaluations strip at bottom */}
         <section className="pt-2 border-t border-border/40">
           <RecentRuns
             runs={runs}

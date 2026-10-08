@@ -10,6 +10,7 @@ interface WorkflowGraphProps {
 interface NodeLayout {
   id: NodeName;
   label: string;
+  sublabel: string;
   x: number;
   y: number;
   w: number;
@@ -17,20 +18,92 @@ interface NodeLayout {
 }
 
 const NODES: NodeLayout[] = [
-  { id: "inspect", label: "inspect", x: 175, y: 10, w: 90, h: 30 },
-  { id: "checks", label: "checks", x: 175, y: 65, w: 90, h: 30 },
-  { id: "evaluate", label: "evaluate", x: 175, y: 120, w: 90, h: 30 },
-  { id: "apply", label: "apply", x: 45, y: 178, w: 86, h: 30 },
-  { id: "review", label: "review", x: 177, y: 178, w: 86, h: 30 },
-  { id: "stop", label: "stop", x: 309, y: 178, w: 86, h: 30 },
+  {
+    id: "inspect",
+    label: "inspect",
+    sublabel: "Change Inspection",
+    x: 185,
+    y: 20,
+    w: 170,
+    h: 48,
+  },
+  {
+    id: "checks",
+    label: "checks",
+    sublabel: "Automated Verification",
+    x: 185,
+    y: 112,
+    w: 170,
+    h: 48,
+  },
+  {
+    id: "evaluate",
+    label: "evaluate",
+    sublabel: "Gate Evaluation",
+    x: 185,
+    y: 204,
+    w: 170,
+    h: 48,
+  },
+  {
+    id: "apply",
+    label: "apply",
+    sublabel: "Auto-merge",
+    x: 35,
+    y: 316,
+    w: 140,
+    h: 48,
+  },
+  {
+    id: "review",
+    label: "review",
+    sublabel: "Human Approval",
+    x: 200,
+    y: 316,
+    w: 140,
+    h: 48,
+  },
+  {
+    id: "stop",
+    label: "stop",
+    sublabel: "Halt Execution",
+    x: 365,
+    y: 316,
+    w: 140,
+    h: 48,
+  },
 ];
 
-const EDGES: { from: NodeName; to: NodeName; x1: number; y1: number; x2: number; y2: number }[] = [
-  { from: "inspect", to: "checks", x1: 220, y1: 40, x2: 220, y2: 65 },
-  { from: "checks", to: "evaluate", x1: 220, y1: 95, x2: 220, y2: 120 },
-  { from: "evaluate", to: "apply", x1: 190, y1: 150, x2: 88, y2: 178 },
-  { from: "evaluate", to: "review", x1: 220, y1: 150, x2: 220, y2: 178 },
-  { from: "evaluate", to: "stop", x1: 250, y1: 150, x2: 352, y2: 178 },
+const EDGES: {
+  from: NodeName;
+  to: NodeName;
+  path: string;
+}[] = [
+  {
+    from: "inspect",
+    to: "checks",
+    path: "M 270 68 L 270 112",
+  },
+  {
+    from: "checks",
+    to: "evaluate",
+    path: "M 270 160 L 270 204",
+  },
+  {
+    from: "evaluate",
+    to: "apply",
+    path: "M 225 252 C 225 285, 105 280, 105 316",
+  },
+  {
+    from: "evaluate",
+    to: "review",
+    path: "M 270 252 L 270 316",
+  },
+  {
+    from: "evaluate",
+    to: "stop",
+    path: "M 315 252 C 315 285, 435 280, 435 316",
+  },
 ];
 
 export function WorkflowGraph({
@@ -55,24 +128,29 @@ export function WorkflowGraph({
   }, [terminalVerdict]);
 
   return (
-    <div className="rounded border bg-card/40 p-3">
-      <div className="flex items-center justify-between pb-2 text-xs font-medium text-muted-foreground">
-        <span>Workflow Graph</span>
-        <span className="font-mono text-[11px]">
-          {visitedSet.size > 0 ? `${visitedSet.size} nodes traversed` : "Static pipeline schema"}
+    <div className="rounded border border-border/80 bg-card/40 p-4 space-y-3">
+      <div className="flex items-center justify-between border-b border-border/40 pb-2.5">
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Workflow Graph
+          </span>
+          <span className="text-[11px] text-muted-foreground">• Deterministic Pipeline DAG</span>
+        </div>
+        <span className="font-mono text-[11px] text-muted-foreground">
+          {visitedSet.size > 0 ? `${visitedSet.size} of 6 nodes active` : "Schema idle"}
         </span>
       </div>
 
-      <div className="w-full flex items-center justify-center">
+      <div className="w-full flex items-center justify-center py-2">
         <svg
-          viewBox="0 0 440 220"
-          className="w-full max-w-[440px] h-auto select-none"
+          viewBox="0 0 540 380"
+          className="w-full max-w-[540px] h-[360px] sm:h-[400px] select-none"
           role="img"
-          aria-label="ChangeGate workflow traversal graph"
+          aria-label="ChangeGate workflow traversal diagram"
         >
           <defs>
             <marker
-              id="edge-arrow-default"
+              id="graph-arrow-default"
               viewBox="0 0 10 10"
               refX="8"
               refY="5"
@@ -80,15 +158,15 @@ export function WorkflowGraph({
               markerHeight="6"
               orient="auto-start-reverse"
             >
-              <path d="M0,1 L8,5 L0,9 z" fill="currentColor" opacity="0.3" />
+              <path d="M0,1 L8,5 L0,9 z" fill="currentColor" opacity="0.25" />
             </marker>
             <marker
-              id="edge-arrow-active"
+              id="graph-arrow-active"
               viewBox="0 0 10 10"
               refX="8"
               refY="5"
-              markerWidth="6"
-              markerHeight="6"
+              markerWidth="7"
+              markerHeight="7"
               orient="auto-start-reverse"
             >
               <path d="M0,1 L8,5 L0,9 z" fill={terminalColor} />
@@ -99,16 +177,19 @@ export function WorkflowGraph({
           {EDGES.map((edge) => {
             const isTraversed = visitedEdgeSet.has(`${edge.from}->${edge.to}`);
             return (
-              <line
+              <path
                 key={`${edge.from}->${edge.to}`}
-                x1={edge.x1}
-                y1={edge.y1}
-                x2={edge.x2}
-                y2={edge.y2}
+                d={edge.path}
+                fill="none"
                 stroke={isTraversed ? terminalColor : "currentColor"}
-                strokeOpacity={isTraversed ? 1 : 0.2}
-                strokeWidth={isTraversed ? 2 : 1.2}
-                markerEnd={isTraversed ? "url(#edge-arrow-active)" : "url(#edge-arrow-default)"}
+                strokeOpacity={isTraversed ? 1 : 0.18}
+                strokeWidth={isTraversed ? 2.5 : 1.2}
+                strokeDasharray={isTraversed ? "none" : "3,3"}
+                markerEnd={
+                  isTraversed
+                    ? "url(#graph-arrow-active)"
+                    : "url(#graph-arrow-default)"
+                }
               />
             );
           })}
@@ -116,48 +197,58 @@ export function WorkflowGraph({
           {/* Nodes */}
           {NODES.map((node) => {
             const isVisited = visitedSet.has(node.id);
-            const isTerminal = node.id === "apply" || node.id === "review" || node.id === "stop";
+            const isTerminal =
+              node.id === "apply" || node.id === "review" || node.id === "stop";
 
             let strokeColor = "currentColor";
             let strokeOpacity = 0.25;
             let fillColor = "transparent";
-            let textColor = "currentColor";
-            let textOpacity = 0.45;
-            let fontWeight = 400;
+            let titleColor = "currentColor";
+            let titleOpacity = 0.45;
+            let sublabelColor = "currentColor";
+            let sublabelOpacity = 0.3;
+            let strokeWidth = 1;
 
             if (isVisited) {
-              fontWeight = 600;
-              textOpacity = 1;
+              strokeWidth = 2;
+              titleOpacity = 1;
+              sublabelOpacity = 0.75;
+
               if (node.id === "apply") {
                 strokeColor = "#10b981";
                 strokeOpacity = 1;
                 fillColor = "rgba(16, 185, 129, 0.12)";
-                textColor = "#10b981";
+                titleColor = "#10b981";
+                sublabelColor = "#10b981";
               } else if (node.id === "review") {
                 strokeColor = "#f59e0b";
                 strokeOpacity = 1;
                 fillColor = "rgba(245, 158, 11, 0.12)";
-                textColor = "#f59e0b";
+                titleColor = "#f59e0b";
+                sublabelColor = "#f59e0b";
               } else if (node.id === "stop") {
                 strokeColor = "#ef4444";
                 strokeOpacity = 1;
                 fillColor = "rgba(239, 68, 68, 0.12)";
-                textColor = "#ef4444";
+                titleColor = "#ef4444";
+                sublabelColor = "#ef4444";
               } else if (node.id === "evaluate") {
                 strokeColor = "#3b82f6";
                 strokeOpacity = 1;
                 fillColor = "rgba(59, 130, 246, 0.12)";
-                textColor = "#3b82f6";
+                titleColor = "#3b82f6";
+                sublabelColor = "#3b82f6";
               } else {
                 strokeColor = "currentColor";
-                strokeOpacity = 0.8;
+                strokeOpacity = 0.85;
                 fillColor = "rgba(120, 120, 120, 0.08)";
-                textColor = "currentColor";
+                titleColor = "currentColor";
+                sublabelColor = "currentColor";
               }
             } else if (isTerminal) {
-              // Subdued terminal option
-              strokeOpacity = 0.18;
-              textOpacity = 0.3;
+              strokeOpacity = 0.16;
+              titleOpacity = 0.28;
+              sublabelOpacity = 0.2;
             }
 
             return (
@@ -167,23 +258,38 @@ export function WorkflowGraph({
                   y={node.y}
                   width={node.w}
                   height={node.h}
-                  rx={4}
+                  rx={6}
                   fill={fillColor}
                   stroke={strokeColor}
                   strokeOpacity={strokeOpacity}
-                  strokeWidth={isVisited ? 1.75 : 1}
+                  strokeWidth={strokeWidth}
                 />
+                {/* Node Title */}
                 <text
                   x={node.x + node.w / 2}
-                  y={node.y + node.h / 2 + 4}
+                  y={node.y + 22}
                   textAnchor="middle"
                   fontFamily="ui-monospace, monospace"
-                  fontSize={11}
-                  fill={textColor}
-                  fillOpacity={textOpacity}
-                  fontWeight={fontWeight}
+                  fontSize={13}
+                  fontWeight={isVisited ? 700 : 500}
+                  fill={titleColor}
+                  fillOpacity={titleOpacity}
+                  letterSpacing="0.05em"
                 >
-                  {node.label}
+                  {node.label.toUpperCase()}
+                </text>
+                {/* Node Sublabel */}
+                <text
+                  x={node.x + node.w / 2}
+                  y={node.y + 38}
+                  textAnchor="middle"
+                  fontFamily="ui-sans-serif, system-ui, sans-serif"
+                  fontSize={10}
+                  fontWeight={400}
+                  fill={sublabelColor}
+                  fillOpacity={sublabelOpacity}
+                >
+                  {node.sublabel}
                 </text>
               </g>
             );
